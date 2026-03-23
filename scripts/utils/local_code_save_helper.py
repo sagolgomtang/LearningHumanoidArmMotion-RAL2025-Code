@@ -49,7 +49,8 @@ def log_and_save(log_dir):
     ]
 
     # copy the relevant source files to the local logs for records
-    save_dir = log_dir+'/files/'
+    save_dir = log_dir + '/files/'
+    os.makedirs(save_dir, exist_ok=True)
     for save_path in save_paths:
         if save_path['type'] == 'file':
             os.makedirs(save_dir+save_path['target_dir'],
@@ -59,9 +60,11 @@ def log_and_save(log_dir):
         elif save_path['type'] == 'dir':
             shutil.copytree(
                 save_path['source_dir'],
-                save_dir+save_path['target_dir'],
+                save_dir + save_path['target_dir'],
                 ignore=create_ignored_pattern_except(
-                    *save_path['include_patterns']))
+                    *save_path['include_patterns']),
+                dirs_exist_ok=True,
+            )
         else:
             print('WARNING: uncaught save path type:', save_path['type'])
             

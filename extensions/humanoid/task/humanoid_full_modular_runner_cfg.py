@@ -16,8 +16,8 @@ from isaaclab_rl.rsl_rl import (
 class HumanoidFullModularPPORunnerCfg(RslRlModularOnPolicyRunnerCfg):
     seed = 42 # -1
     num_steps_per_env = 24
-    max_iterations = 1000
-    save_interval = 200
+    max_iterations = 5000
+    save_interval = 500
     experiment_name = "Humanoid_Full_Modular"
     logger = "wandb"
     enable_logging = True

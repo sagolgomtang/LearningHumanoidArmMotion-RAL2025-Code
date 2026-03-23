@@ -9,6 +9,15 @@ from __future__ import annotations
 
 """Launch Isaac Sim Simulator first."""
 
+import os
+import sys
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ensure the local repo is used before any other installed IsaacLab packages.
+sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.join(_REPO_ROOT, "IsaacLab", "source"))
+sys.path.insert(0, os.path.join(_REPO_ROOT, "IsaacLab", "source", "isaaclab_tasks"))
+
 
 import argparse
 
@@ -37,7 +46,6 @@ simulation_app = app_launcher.app
 
 
 import gymnasium as gym
-import os
 import torch
 import traceback
 
@@ -46,6 +54,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 # Import extensions to set up environment tasks
 import extensions.humanoid  # noqa: F401
+import extensions.tocabi.task  # noqa: F401
 import isaaclab_tasks  # noqa: F401
 from extensions import ISAACLAB_BRL_ROOT_DIR
 

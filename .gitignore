@@ -1,7 +1,4 @@
-**/__pycache__/
-logs/
 wandb/
-casadi_functions/
-data/
-figures/
-db/
+logs/
+__pycache__/
+*.pyc

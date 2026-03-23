@@ -1,0 +1,1 @@
+# from . import task  # noqa: F401  (import side-effect: gym.register)

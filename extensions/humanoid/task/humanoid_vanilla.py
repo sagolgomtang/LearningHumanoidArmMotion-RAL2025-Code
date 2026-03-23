@@ -3,6 +3,7 @@ import gymnasium as gym
 import math
 import numpy as np
 import torch
+import casadi as ca
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -14,6 +15,13 @@ from ..utils import VanillaKeyboard, HumanoidVanillaRecorder
 
 import isaaclab.utils.math as math_utils
 import extensions.humanoid.utils as brl_utils
+
+
+def _load_casadi(path):
+    # Load from serialize() latin1 format.
+    with open(path, 'rb') as f:
+        data = f.read()
+    return ca.Function.deserialize(data.decode('latin1'))
 
 from extensions.humanoid.dynamics import PINOCCHIO_CASADI_FUNCTIONS_DIR
 from casadi import Function
@@ -80,17 +88,29 @@ class HumanoidVanillaEnv(ManagerBasedRLEnv):
         self.gen_vel_body_pin = torch.zeros(self.num_envs, self.num_total_joints, device=self.device, requires_grad=False)
         self.gen_vel_body_pin_des = torch.zeros(self.num_envs, self.num_total_joints, device=self.device, requires_grad=False)
         self.gen_coord_pin_RS = torch.zeros(self.num_envs, 6 + self.num_leg_joints + self.num_arm_joints, device=self.device, requires_grad=False) # For RS, (roll, pitch, yaw) instead of (quaternion)
+        # CM / dCM buffers (initialized before observation manager reads them)
+        self.CM = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False)
+        self.CM_base = torch.zeros_like(self.CM)
+        self.CM_leg = torch.zeros_like(self.CM)
+        self.CM_arm = torch.zeros_like(self.CM)
+        self.CM_des = torch.zeros_like(self.CM)
+        self.CM_bf = torch.zeros_like(self.CM)
+        self.CM_base_bf = torch.zeros_like(self.CM)
+        self.CM_leg_bf = torch.zeros_like(self.CM)
+        self.CM_arm_bf = torch.zeros_like(self.CM)
+        self.CM_des_bf = torch.zeros_like(self.CM)
+        self.dCM = torch.zeros_like(self.CM)
+        self.dCM_base = torch.zeros_like(self.CM)
+        self.dCM_leg = torch.zeros_like(self.CM)
+        self.dCM_arm = torch.zeros_like(self.CM)
+        self.dCM_des = torch.zeros_like(self.CM)
+        self.dCM_bf = torch.zeros_like(self.CM)
+        self.dCM_base_bf = torch.zeros_like(self.CM)
+        self.dCM_leg_bf = torch.zeros_like(self.CM)
+        self.dCM_arm_bf = torch.zeros_like(self.CM)
+        self.dCM_des_bf = torch.zeros_like(self.CM)
+        self.rot_matrix_block = torch.zeros(self.num_envs, 6, 6, device=self.device, requires_grad=False)
 
-        self.CM = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Centroidal Momentum
-        self.CM_base = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of base joint to Centroidal Momentum
-        self.CM_leg = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of leg joints to Centroidal Momentum
-        self.CM_arm = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of arm joints to Centroidal Momentum
-        self.CM_des = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Desired Centroidal Momentum
-
-        self.dCM = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Time derivative of Centroidal Momentum
-        self.dCM_base = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of base joint to the time derivative of Centroidal Momentum
-        self.dCM_leg = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of leg joints to the time derivative of Centroidal Momentum
-        self.dCM_arm = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Contribution of arm joints to the time derivative of Centroidal Momentum
         self.dCM_des = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False) # Desired time derivative of Centroidal Momentum
 
         self.rot_matrix_block = torch.zeros(self.num_envs, 6, 6, device=self.device, requires_grad=False)
@@ -108,21 +128,21 @@ class HumanoidVanillaEnv(ManagerBasedRLEnv):
         self.dCM_des_bf = torch.zeros(self.num_envs, 6, dtype=torch.float, device=self.device, requires_grad=False)
 
         self._set_CasADi_urdf_name()
-        self.M_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{self.urdf_name}.casadi") # Mass matrix
-        self.CMM_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CMM_{self.urdf_name}.casadi") # Centroidal Momentum Matrix
-        self.dCMM_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCMM_{self.urdf_name}.casadi") # Time derivative of Centroidal Momentum Matrix
-        self.CM_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CM_{self.urdf_name}.casadi") # Centroidal Momentum
-        self.dCM_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCM_{self.urdf_name}.casadi") # Time derivative of Centroidal Momentum
-        self.CoM_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CoM_{self.urdf_name}.casadi") # Center of Mass
+        self.M_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{self.urdf_name}.casadi") # Mass matrix
+        self.CMM_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CMM_{self.urdf_name}.casadi") # Centroidal Momentum Matrix
+        self.dCMM_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCMM_{self.urdf_name}.casadi") # Time derivative of Centroidal Momentum Matrix
+        self.CM_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CM_{self.urdf_name}.casadi") # Centroidal Momentum
+        self.dCM_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCM_{self.urdf_name}.casadi") # Time derivative of Centroidal Momentum
+        self.CoM_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CoM_{self.urdf_name}.casadi") # Center of Mass
         
-        self.base_pos_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_pos_{self.urdf_name}.casadi") # Base position
-        self.base_rot_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_rot_{self.urdf_name}.casadi") # Base orientation in SO(3)
+        self.base_pos_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_pos_{self.urdf_name}.casadi") # Base position
+        self.base_rot_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_rot_{self.urdf_name}.casadi") # Base orientation in SO(3)
 
-        self.cusadi_CMM_fn = CusadiFunction(self.CMM_fn, num_instances=self.num_envs, precision='float')
-        self.cusadi_dCMM_fn = CusadiFunction(self.dCMM_fn, num_instances=self.num_envs, precision='float')
-        self.cusadi_CM_fn = CusadiFunction(self.CM_fn, num_instances=self.num_envs, precision='float')
-        self.cusadi_dCM_fn = CusadiFunction(self.dCM_fn, num_instances=self.num_envs, precision='float')
-        self.cusadi_CoM_fn = CusadiFunction(self.CoM_fn, num_instances=self.num_envs, precision='float')
+        self.cusadi_CMM_fn = CusadiFunction(self.CMM_fn, num_instances=self.num_envs, precision='double')
+        self.cusadi_dCMM_fn = CusadiFunction(self.dCMM_fn, num_instances=self.num_envs, precision='double')
+        self.cusadi_CM_fn = CusadiFunction(self.CM_fn, num_instances=self.num_envs, precision='double')
+        self.cusadi_dCM_fn = CusadiFunction(self.dCM_fn, num_instances=self.num_envs, precision='double')
+        self.cusadi_CoM_fn = CusadiFunction(self.CoM_fn, num_instances=self.num_envs, precision='double')
     
     def _set_CasADi_urdf_name(self):
         self.urdf_name = "humanoid_full_sf" # "humanoid_full_sf" or "humanoid_full_sf_400g"
@@ -231,7 +251,10 @@ class HumanoidVanillaEnv(ManagerBasedRLEnv):
 
     def _calculate_CoM(self):
         """ Calculate the CoM position of the robot """
-        self.cusadi_CoM_fn.evaluate([self.gen_coord_pin.to('cuda')])
+        x = self.gen_coord_pin.to(self.device)
+        if getattr(self.cusadi_CoM_fn, "precision", "double") == "double" and x.dtype != torch.double:
+            x = x.to(torch.double)
+        self.cusadi_CoM_fn.evaluate([x])
         self.CoM = self.cusadi_CoM_fn.outputs_sparse[0].to(self.device).float()
 
     def _calculate_centroidal_momentum(self):
@@ -240,24 +263,41 @@ class HumanoidVanillaEnv(ManagerBasedRLEnv):
             We need to convert it to whole body's CoM frame
             Convert from root_link_CoM (world frame) -> root_link (base frame) -> CoM (world frame)
         """
-        self.cusadi_CMM_fn.evaluate([self.gen_coord_pin.to('cuda')])
+        q = self.gen_coord_pin.to(self.device)
+        v = self.gen_vel_body_pin.to(self.device)
+        if getattr(self.cusadi_CMM_fn, "precision", "double") == "double":
+            if q.dtype != torch.double:
+                q = q.to(torch.double)
+            if v.dtype != torch.double:
+                v = v.to(torch.double)
+        self.cusadi_CMM_fn.evaluate([q])
         CMM = self.cusadi_CMM_fn.outputs_sparse[0].reshape(self.num_envs, -1, self.num_base_joints).permute(0,2,1).to(self.device)
-        self.cusadi_dCMM_fn.evaluate([self.gen_coord_pin.to('cuda'), self.gen_vel_body_pin.to('cuda')])
+        self.cusadi_dCMM_fn.evaluate([q, v])
         dCMM = self.cusadi_dCMM_fn.outputs_sparse[0].reshape(self.num_envs, -1, self.num_base_joints).permute(0,2,1).to(self.device)
+        v_mat = self.gen_vel_body_pin.to(CMM.dtype)
+        a_mat = self.gen_acc_body_pin.to(CMM.dtype)
+        v_des = self.gen_vel_body_pin_des.to(CMM.dtype)
 
-        self.CM = (CMM @ self.gen_vel_body_pin.unsqueeze(2)).squeeze(2).float()
-        self.CM_base = (CMM[:,:,:self.num_base_joints] @ self.gen_vel_body_pin[:,:self.num_base_joints].unsqueeze(2)).squeeze(2).float() # A(q) * qdot
-        self.CM_leg = (CMM[:,:,self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ self.gen_vel_body_pin[:,self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float() # A(q) * qdot
-        self.CM_arm = (CMM[:,:,self.num_base_joints+self.num_leg_joints:] @ self.gen_vel_body_pin[:,self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float() # A(q) * qdot
-        self.CM_des = (CMM @ self.gen_vel_body_pin_des.unsqueeze(2)).squeeze(2).float()
+        self.CM = (CMM @ v_mat.unsqueeze(2)).squeeze(2).float()
+        self.CM_base = (CMM[:, :, :self.num_base_joints] @ v_mat[:, :self.num_base_joints].unsqueeze(2)).squeeze(2).float()  # A(q) * qdot
+        self.CM_leg = (CMM[:, :, self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ v_mat[:, self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float()  # A(q) * qdot
+        self.CM_arm = (CMM[:, :, self.num_base_joints+self.num_leg_joints:] @ v_mat[:, self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float()  # A(q) * qdot
+        self.CM_des = (CMM @ v_des.unsqueeze(2)).squeeze(2).float()
 
-        self.dCM = (dCMM @ self.gen_vel_body_pin.unsqueeze(2)).squeeze(2).float() + (CMM @ self.gen_acc_body_pin.unsqueeze(2)).squeeze(2).float() # dCM = dA(q) * qdot + A(q) * qddot
-        self.dCM_base = (dCMM[:,:,:self.num_base_joints] @ self.gen_vel_body_pin[:,:self.num_base_joints].unsqueeze(2)).squeeze(2).float() + \
-                         (CMM[:,:,:self.num_base_joints] @ self.gen_acc_body_pin[:,:self.num_base_joints].unsqueeze(2)).squeeze(2).float()
-        self.dCM_leg = (dCMM[:,:,self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ self.gen_vel_body_pin[:,self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float() + \
-                        (CMM[:,:,self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ self.gen_acc_body_pin[:,self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float()
-        self.dCM_arm = (dCMM[:,:,self.num_base_joints+self.num_leg_joints:] @ self.gen_vel_body_pin[:,self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float() + \
-                        (CMM[:,:,self.num_base_joints+self.num_leg_joints:] @ self.gen_acc_body_pin[:,self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float()
+        self.dCM = (dCMM @ v_mat.unsqueeze(2)).squeeze(2).float() + (CMM @ a_mat.unsqueeze(2)).squeeze(2).float()  # dCM = dA(q) * qdot + A(q) * qddot
+        self.dCM_base = (
+            (dCMM[:, :, :self.num_base_joints] @ v_mat[:, :self.num_base_joints].unsqueeze(2)).squeeze(2).float()
+            + (CMM[:, :, :self.num_base_joints] @ a_mat[:, :self.num_base_joints].unsqueeze(2)).squeeze(2).float()
+        )
+        self.dCM_leg = (
+            (dCMM[:, :, self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ v_mat[:, self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float()
+            + (CMM[:, :, self.num_base_joints:self.num_base_joints+self.num_leg_joints] @ a_mat[:, self.num_base_joints:self.num_base_joints+self.num_leg_joints].unsqueeze(2)).squeeze(2).float()
+        )
+        self.dCM_arm = (
+            (dCMM[:, :, self.num_base_joints+self.num_leg_joints:] @ v_mat[:, self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float()
+            + (CMM[:, :, self.num_base_joints+self.num_leg_joints:] @ a_mat[:, self.num_base_joints+self.num_leg_joints:].unsqueeze(2)).squeeze(2).float()
+        )
+
 
         rot_matrix = math_utils.matrix_from_quat(self.robot.data.root_link_quat_w).permute(0,2,1) # Rotation matrix from world frame to base frame
         self.rot_matrix_block[:,:3,:3] = rot_matrix

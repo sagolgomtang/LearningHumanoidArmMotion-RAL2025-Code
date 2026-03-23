@@ -13,6 +13,20 @@ from casadi import Function, SX
 from extensions import ISAACLAB_BRL_ROOT_DIR
 from extensions.humanoid.dynamics import PINOCCHIO_CASADI_FUNCTIONS_DIR
 
+
+def _save_casadi(fn, path):
+    # Save as serialized string for reliable deserialize().
+    with open(path, 'w') as f:
+        f.write(fn.serialize())
+
+
+def _load_casadi(path):
+    # Match serialize() format saved above.
+    with open(path, 'rb') as f:
+        data = f.read()
+    return ca.Function.deserialize(data.decode('latin1'))
+
+
 np.set_printoptions(threshold=1000, linewidth=1000, precision=6)
 
 
@@ -149,9 +163,9 @@ def test_forward_kinematics_from_urdf(urdf_path, frame_name=None):
     # Save as casadi functions
     fk = Function("fk", [q_sym], [cpos, crot])
     fk.expand()
-    fk.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}.casadi")
+    _save_casadi(fk, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}.casadi")
 
-    fk_load = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}.casadi")
+    fk_load = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}.casadi")
     pos, rot = fk_load(q_num)
     print(f"Frame {frame_name} \nposition: {pos} \nrotation: \n{rot}")
 
@@ -195,8 +209,8 @@ def save_forward_kinematics(urdf_name, urdf_path, frame_names):
     crot_fn = Function(f"base_rot_{urdf_name}", [q_sym], [crot])
     cpos_fn.expand()
     crot_fn.expand()
-    cpos_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_pos_{urdf_name}.casadi")
-    crot_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_rot_{urdf_name}.casadi")
+    _save_casadi(cpos_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_pos_{urdf_name}.casadi")
+    _save_casadi(crot_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/base_rot_{urdf_name}.casadi")
 
     M = cpin.crba(cmodel, cdata, q_sym) # pin.Convention.WORLD / pin.Convention.LOCAL
     C = cpin.computeCoriolisMatrix(cmodel, cdata, q_sym, q_dot_sym) @ q_dot_sym
@@ -207,9 +221,9 @@ def save_forward_kinematics(urdf_name, urdf_path, frame_names):
     M_fn.expand()
     C_fn.expand()
     G_fn.expand()
-    M_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{urdf_name}.casadi")
-    C_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/C_{urdf_name}.casadi")
-    G_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/G_{urdf_name}.casadi")
+    _save_casadi(M_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{urdf_name}.casadi")
+    _save_casadi(C_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/C_{urdf_name}.casadi")
+    _save_casadi(G_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/G_{urdf_name}.casadi")
 
     CMM = cpin.computeCentroidalMap(cmodel, cdata, q_sym)
     dCMM = cpin.computeCentroidalMapTimeVariation(cmodel, cdata, q_sym, q_dot_sym)
@@ -226,11 +240,11 @@ def save_forward_kinematics(urdf_name, urdf_path, frame_names):
     CM_fn.expand()
     dCM_fn.expand()
     CoM_fn.expand()
-    CMM_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CMM_{urdf_name}.casadi")
-    dCMM_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCMM_{urdf_name}.casadi")
-    CM_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CM_{urdf_name}.casadi")
-    dCM_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCM_{urdf_name}.casadi")
-    CoM_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CoM_{urdf_name}.casadi")
+    _save_casadi(CMM_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CMM_{urdf_name}.casadi")
+    _save_casadi(dCMM_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCMM_{urdf_name}.casadi")
+    _save_casadi(CM_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CM_{urdf_name}.casadi")
+    _save_casadi(dCM_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/dCM_{urdf_name}.casadi")
+    _save_casadi(CoM_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/CoM_{urdf_name}.casadi")
 
     for frame_name in frame_names:
         # Run forward kinematics
@@ -252,23 +266,23 @@ def save_forward_kinematics(urdf_name, urdf_path, frame_names):
         # Save as casadi functions
         fk_fn = Function(f"fk_{urdf_name}", [q_sym], [cpos, crot])
         fk_fn.expand()
-        fk_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}_{urdf_name}.casadi")
+        _save_casadi(fk_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}_{urdf_name}.casadi")
 
         # Compute Jacobian
         jacobian = cpin.computeFrameJacobian(cmodel, cdata, q_sym, frame_id, pin.LOCAL_WORLD_ALIGNED) # pin.WORLD / pin.LOCAL / pin.LOCAL_WORLD_ALIGNED
         jacobian_fn = Function(f"jacobian_{frame_name}_{urdf_name}", [q_sym], [jacobian])
         jacobian_fn.expand()
-        jacobian_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}_{urdf_name}.casadi")
+        _save_casadi(jacobian_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}_{urdf_name}.casadi")
 
         test_lin_jac = ca.jacobian(clinear_velocity, q_dot_sym)
         lin_jac_fn = Function("lin_jac", [q_sym], [test_lin_jac])
         lin_jac_fn.expand()
-        # lin_jac_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
+        # _save_casadi(lin_jac_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
 
         test_ang_jac = ca.jacobian(cangular_velocity, q_dot_sym) # once taking derivate w.r.t q_dot_sym, the jacobian is only function of q_sym
         ang_jac_fn = Function("ang_jac", [q_sym], [test_ang_jac])
         ang_jac_fn.expand()
-        # ang_jac_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
+        # _save_casadi(ang_jac_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
 
 
 def load_forward_kinematics(urdf_name, urdf_path, frame_names):
@@ -284,9 +298,9 @@ def load_forward_kinematics(urdf_name, urdf_path, frame_names):
     print(f"q_num: {q_num.T}")
     print(f"q_dot_num: {q_dot_num.T}")
 
-    M_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{urdf_name}.casadi")
-    C_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/C_{urdf_name}.casadi")
-    G_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/G_{urdf_name}.casadi")
+    M_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/M_{urdf_name}.casadi")
+    C_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/C_{urdf_name}.casadi")
+    G_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/G_{urdf_name}.casadi")
     M = M_fn(q_num)
     C = C_fn(q_num, q_dot_num)
     G = G_fn(q_num)
@@ -295,31 +309,31 @@ def load_forward_kinematics(urdf_name, urdf_path, frame_names):
     print(f"G(q): \n{np.array(G)}")
 
     for frame_name in frame_names:
-        fk_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}_{urdf_name}.casadi")
+        fk_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_{frame_name}_{urdf_name}.casadi")
         pos, rot = fk_fn(q_num)
         print(f"Frame {frame_name} \nposition: {np.array(pos.T)} \nrotation: \n{np.array(rot)}")
 
-        jacobian_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}_{urdf_name}.casadi")
+        jacobian_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}_{urdf_name}.casadi")
         jacobian = jacobian_fn(q_num)
         print(f"Jacobian {frame_name}: \n{np.array(jacobian)}")
 
-        # lin_jac_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
+        # lin_jac_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
         # lin_jac = lin_jac_fn(q_num)
         # print(f"Lin Jaco {frame_name}: \n{np.array(lin_jac)}")
 
-        # ang_jac_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
+        # ang_jac_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
         # ang_jac = ang_jac_fn(q_num)
         # print(f"Ang Jaco {frame_name}: \n{np.array(ang_jac)}")
         
-        # fk_right_foot_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_right_foot.casadi")
-        # fk_left_foot_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_left_foot.casadi")
+        # fk_right_foot_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_right_foot.casadi")
+        # fk_left_foot_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/fk_left_foot.casadi")
         # pos, rot = fk_right_foot_fn(q_num)
         # print(f"Frame right_foot \nposition: {np.array(pos.T)} \nrotation: \n{np.array(rot)}")
         # pos, rot = fk_left_foot_fn(q_num)
         # print(f"Frame left_foot \nposition: {np.array(pos.T)} \nrotation: \n{np.array(rot)}")
 
-        # jacobian_right_foot_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_right_foot.casadi")
-        # jacobian_left_foot_fn = Function.load(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_left_foot.casadi")
+        # jacobian_right_foot_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_right_foot.casadi")
+        # jacobian_left_foot_fn = _load_casadi(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_left_foot.casadi")
 
         # jacobian_right_foot = jacobian_right_foot_fn(q_num)
         # print(f"Jacobian right_foot: \n{np.array(jacobian_right_foot)}")
@@ -367,12 +381,12 @@ if __name__ == "__main__":
     test_lin_jac = ca.jacobian(clinear_velocity, q_dot_sym)
     lin_jac = Function("lin_jac", [q_sym], [test_lin_jac])
     lin_jac.expand()
-    lin_jac.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
+    _save_casadi(lin_jac, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/lin_jac_{frame_name}.casadi")
 
     test_ang_jac = ca.jacobian(cangular_velocity, q_dot_sym) # once taking derivate w.r.t q_dot_sym, the jacobian is only function of q_sym
     ang_jac = Function("ang_jac", [q_sym], [test_ang_jac])
     ang_jac.expand()
-    ang_jac.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
+    _save_casadi(ang_jac, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/ang_jac_{frame_name}.casadi")
 
     These each give a 3x16 jacobian matrix that maps joint positiono to linear or angular velocity of the frame.
     This perfectly matches with below:
@@ -381,7 +395,7 @@ if __name__ == "__main__":
     jacobian = cpin.computeFrameJacobian(cmodel, cdata, q_sym, frame_id)
     jacobian_fn = Function("jacobian", [q_sym], [jacobian])
     jacobian_fn.expand()
-    jacobian_fn.save(f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}.casadi")
+    _save_casadi(jacobian_fn, f"{PINOCCHIO_CASADI_FUNCTIONS_DIR}/jacobian_{frame_name}.casadi")
 
 4. The full body dynamics equation of motion : M(q) @ q_ddot + C(q, q_dot) @ q_dot + G(q) = tau + J_c.T @ F_c
     M = cpin.crba(cmodel, cdata, q_sym)

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import torch
+import carb
 from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation, RigidObject
@@ -182,7 +183,17 @@ def CAM_xy_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg):
 def dCAM_xy_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg):
     asset: RigidObject = env.scene[asset_cfg.name]
     # Penalize the change in centroidal angular momentum in the xy plane
-    return -torch.clamp_min(torch.sum(env.CM_bf[:, 3:5] * env.dCM_bf[:, 3:5], dim=1), 0.0)  # only positive build-up
+    dcam_xy = env.dCM_bf[:, 3:5]
+    if not hasattr(env, "_dcam_debug_counter"):
+        env._dcam_debug_counter = 0
+        env._dcam_debug_every = 100
+    env._dcam_debug_counter += 1
+    if env._dcam_debug_counter % env._dcam_debug_every == 0:
+        dcam_norm = torch.linalg.norm(dcam_xy, dim=1)
+        mean_val = dcam_norm.mean().item()
+        max_val = dcam_norm.max().item()
+        carb.log_warn(f"[HUMANOID][DCAM_DEBUG] |dCAM_xy| mean={mean_val:.3e} max={max_val:.3e}")
+    return -torch.clamp_min(torch.sum(env.CM_bf[:, 3:5] * dcam_xy, dim=1), 0.0)  # only positive build-up
 
 def tracking_CAM_reward(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, command_name: str):
     asset: RigidObject = env.scene[asset_cfg.name]
